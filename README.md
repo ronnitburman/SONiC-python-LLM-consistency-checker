@@ -10,7 +10,7 @@ Reads SONiC's internal Redis DB configuration dynamically, explores Redis state,
 |---|---|---|
 | 1 | Dynamic DB Config Discovery | [STEP_01.md](docs/readme/STEP_01.md) |
 | 2 | Redis DB Explorer | [STEP_02.md](docs/readme/STEP_02.md) |
-| 3 | Port View | *(coming)* |
+| 3 | Port View | [STEP_03.md](docs/readme/STEP_03.md) |
 | 4 | Consistency Checks | *(coming)* |
 | 5 | SWSS SDK Explorer | *(coming)* |
 | 6 | UI Demo | *(coming)* |
@@ -63,4 +63,31 @@ uvicorn sonic_consistency_checker.api.main:app --reload
 curl http://localhost:8000/api/dbs
 curl "http://localhost:8000/api/dbs/CONFIG_DB/keys?pattern=PORT*"
 curl "http://localhost:8000/api/dbs/CONFIG_DB/key?key=PORT%7CEthernet0"
+```
+
+---
+
+## Step 3: Normalized Port View
+
+This step builds a cross-DB view of a SONiC port.
+
+### List discovered ports
+
+```bash
+sonic-checker ports
+```
+
+### Show one port
+
+```bash
+sonic-checker port Ethernet0
+```
+
+### API
+
+```bash
+uvicorn sonic_consistency_checker.api.main:app --reload
+
+curl http://localhost:8000/api/ports
+curl http://localhost:8000/api/ports/Ethernet0
 ```

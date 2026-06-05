@@ -1,10 +1,13 @@
-"""Pydantic models for Step 2 — Redis DB Explorer."""
+"""Pydantic models for SONiC consistency checker."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+# ── Step 2 models ──────────────────────────────────────────────────────
 
 
 class DbSizeSummary(BaseModel):
@@ -42,3 +45,26 @@ class KeyTypeResponse(BaseModel):
     db_name: str
     key: str
     key_type: str
+
+
+# ── Step 3 models ──────────────────────────────────────────────────────
+
+
+class PortView(BaseModel):
+    """Normalized cross-DB view of a single SONiC port."""
+
+    name: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    app: dict[str, Any] = Field(default_factory=dict)
+    state: dict[str, Any] = Field(default_factory=dict)
+    asic: dict[str, Any] = Field(default_factory=dict)
+    counters: dict[str, Any] = Field(default_factory=dict)
+    transceiver: dict[str, Any] = Field(default_factory=dict)
+    raw_keys: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class PortsListResponse(BaseModel):
+    """List of discovered port names and their discovery source."""
+
+    ports: list[str]
+    source: str

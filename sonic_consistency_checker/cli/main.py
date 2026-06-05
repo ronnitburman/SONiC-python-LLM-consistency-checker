@@ -13,6 +13,7 @@ from rich.text import Text
 from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
 from sonic_consistency_checker.core.discovery import SonicDiscoveryService
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
+from sonic_consistency_checker.sonic.ports import PortService
 
 load_dotenv()
 
@@ -307,6 +308,168 @@ def key_type_cmd(
     console.print(f"Key: [yellow]{result.key}[/yellow]")
     console.print(f"Type: [magenta]{result.key_type}[/magenta]")
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# Step 3 — Normalized Port View
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="ports")
+def list_ports(
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name for docker_exec/orb_vm_exec mode",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
+    ),
+) -> None:
+    """List all discovered SONiC port names from CONFIG_DB."""
+    svc = PortService(
+        redis_client=SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+    )
+    result = svc.list_config_ports()
+
+    console.print()
+    console.print(Text("Discovered Ports", style="bold cyan"))
+    console.print()
+    console.print(f"Source: {result.source}")
+    console.print()
+
+    if not result.ports:
+        console.print(Text("(no ports found)", style="dim"))
+    else:
+        console.print(Text("Ports:", style="bold"))
+        for port in result.ports:
+            console.print(f"  {port}")
+
+    console.print()
+
+
+@app.command(name="port")
+def show_port(
+    port_name: str = typer.Argument(..., help="Port name, e.g. Ethernet0"),
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name for docker_exec/orb_vm_exec mode",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
+    ),
+) -> None:
+    """Show a normalized cross-DB view of a single SONiC port."""
+    svc = PortService(
+        redis_client=SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+    )
+    view = svc.get_port_view(port_name)
+
+    def _print_section(
+        title: str,
+        data: dict[str, Any],
+        raw_keys: list[str] | None = None,
+    ) -> None:
+        console.print(Text(title, style="bold magenta"))
+        if raw_keys:
+            for rk in raw_keys:
+                console.print(f"  Key: [yellow]{rk}[/yellow]")
+        if not data:
+            console.print(Text("  No data found.", style="dim"))
+        else:
+            for k, v in data.items():
+                if isinstance(v, dict):
+                    # Nested dict (e.g. transceiver key → fields)
+                    if v:
+                        console.print(f"  [yellow]{k}[/yellow]")
+                        for fk, fv in v.items():
+                            console.print(f"    {fk}: {fv}")
+                    else:
+                        console.print(f"  [yellow]{k}[/yellow]")
+                        console.print(Text("    (empty hash)", style="dim"))
+                else:
+                    console.print(f"  {k}: {v}")
+        console.print()
+
+    console.print()
+    console.print(f"Port: [cyan]{view.name}[/cyan]", style="bold")
+    console.print()
+
+    # CONFIG_DB
+    _print_section(
+        "CONFIG_DB",
+        view.config,
+        raw_keys=view.raw_keys.get("CONFIG_DB"),
+    )
+
+    # APPL_DB
+    _print_section(
+        "APPL_DB",
+        view.app,
+        raw_keys=view.raw_keys.get("APPL_DB"),
+    )
+
+    # STATE_DB
+    _print_section(
+        "STATE_DB",
+        view.state,
+        raw_keys=[
+            k for k in view.raw_keys.get("STATE_DB", [])
+            if not k.startswith("TRANSCEIVER")
+        ] or None,
+    )
+
+    # TRANSCEIVER
+    tx_keys = [
+        k for k in view.raw_keys.get("STATE_DB", [])
+        if k.startswith("TRANSCEIVER")
+    ]
+    _print_section(
+        "TRANSCEIVER",
+        view.transceiver,
+        raw_keys=tx_keys or None,
+    )
+
+    # COUNTERS_DB
+    _print_section(
+        "COUNTERS_DB",
+        view.counters,
+        raw_keys=view.raw_keys.get("COUNTERS_DB"),
+    )
+
+    # ASIC_DB
+    _print_section(
+        "ASIC_DB",
+        view.asic,
+        raw_keys=view.raw_keys.get("ASIC_DB"),
+    )
 
 
 if __name__ == "__main__":
