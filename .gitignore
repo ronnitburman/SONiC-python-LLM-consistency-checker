@@ -1,0 +1,56 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ===== Virtual Environment =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== Build & Packaging =====
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ===== IDE & Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== Environment & Secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== Coverage & Testing =====
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+
+# ===== Type Checking =====
+.mypy_cache/
+.pyre/
+.pytype/
+
+# ===== Jupyter Notebooks =====
+.ipynb_checkpoints/
+
+# ===== OS Files =====
+.DS_Store
+Thumbs.db
+
+# ===== Misc =====
+*.log
+*.tmp

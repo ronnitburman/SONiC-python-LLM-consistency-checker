@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
+from sonic_consistency_checker.api.routes_dbs import router as dbs_router
 
 load_dotenv()
 
@@ -16,6 +17,8 @@ app = FastAPI(
     title="SONiC Consistency Checker API",
     version="0.1.0",
 )
+
+app.include_router(dbs_router)
 
 
 @app.get("/health")
