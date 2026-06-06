@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -61,6 +61,7 @@ class PortView(BaseModel):
     counters: dict[str, Any] = Field(default_factory=dict)
     transceiver: dict[str, Any] = Field(default_factory=dict)
     raw_keys: dict[str, list[str]] = Field(default_factory=dict)
+    findings: list[Finding] = Field(default_factory=list)
 
 
 class PortsListResponse(BaseModel):
@@ -68,3 +69,26 @@ class PortsListResponse(BaseModel):
 
     ports: list[str]
     source: str
+
+
+# ── Step 4 models ──────────────────────────────────────────────────────
+
+
+class Finding(BaseModel):
+    """A single consistency finding with evidence."""
+
+    id: str
+    severity: Literal["info", "warning", "critical"]
+    category: str
+    object_type: str
+    object_name: str
+    summary: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    possible_causes: list[str] = Field(default_factory=list)
+    suggested_commands: list[str] = Field(default_factory=list)
+
+
+class FindingsResponse(BaseModel):
+    """A collection of consistency findings."""
+
+    findings: list[Finding]

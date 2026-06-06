@@ -11,6 +11,7 @@ from typing import Any
 
 from sonic_consistency_checker.core.models import PortView, PortsListResponse
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
+from sonic_consistency_checker.core.diff_engine import DiffEngine
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,8 @@ class PortService:
         except Exception:
             logger.debug("ASIC_DB scan skipped for %s", port_name)
 
-        return PortView(
+        # ── Build view & run consistency checks ───────────────────
+        view = PortView(
             name=port_name,
             config=config,
             app=app,
@@ -133,6 +135,18 @@ class PortService:
             transceiver=transceiver,
             raw_keys=raw_keys,
         )
+        view.findings = DiffEngine().check_port(view)
+        return view
+
+    # ------------------------------------------------------------------
+    # Bulk helpers
+    # ------------------------------------------------------------------
+
+    def list_port_views(self) -> list[PortView]:
+        """Return full PortView objects for all discovered ports."""
+        ports_response = self.list_config_ports()
+        return [self.get_port_view(port) for port in ports_response.ports]
+
 
     # ------------------------------------------------------------------
     # Internal helpers
