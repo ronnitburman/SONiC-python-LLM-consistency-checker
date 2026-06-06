@@ -271,8 +271,16 @@ class SonicRedisClient:
 
     @staticmethod
     def _parse_hgetall_output(output: str) -> dict[str, str]:
-        """Parse redis-cli hgetall output (alternating field/value lines)."""
-        lines = [line for line in output.strip().split("\n") if line]
+        """Parse redis-cli hgetall output (alternating field/value lines).
+
+        Empty values are preserved (they appear as blank lines in redis-cli output).
+        Empty/non-existent hashes return an empty dict silently.
+        """
+        lines = output.strip().split("\n")
+
+        # redis-cli returns a single empty line for empty/non-existent hashes
+        if len(lines) == 1 and lines[0] == "":
+            return {}
 
         result: dict[str, str] = {}
         for i in range(0, len(lines) - 1, 2):
