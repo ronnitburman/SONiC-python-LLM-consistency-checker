@@ -13,6 +13,7 @@ from rich.text import Text
 from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
 from sonic_consistency_checker.core.discovery import SonicDiscoveryService
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
+from sonic_consistency_checker.core.models import Finding
 from sonic_consistency_checker.sonic.ports import PortService
 
 load_dotenv()
@@ -29,6 +30,44 @@ console = Console()
 @app.callback()
 def main_callback() -> None:
     """SONiC consistency checker — Dynamic DB config & Redis explorer."""
+
+
+SEVERITY_STYLES = {
+    "critical": "bold red",
+    "warning": "yellow",
+    "info": "cyan",
+}
+
+
+def _print_finding(finding: Finding) -> None:
+    """Print a single Finding with Rich formatting."""
+    sev_style = SEVERITY_STYLES.get(finding.severity, "white")
+    console.print(
+        Text(
+            f"[{finding.severity}] {finding.category} — {finding.object_name}",
+            style=sev_style,
+        )
+    )
+    console.print(finding.summary)
+    console.print()
+
+    if finding.evidence:
+        console.print(Text("Evidence:", style="bold"))
+        for k, v in finding.evidence.items():
+            console.print(f"  {k}: {v}")
+        console.print()
+
+    if finding.possible_causes:
+        console.print(Text("Possible causes:", style="bold"))
+        for cause in finding.possible_causes:
+            console.print(f"  - {cause}")
+        console.print()
+
+    if finding.suggested_commands:
+        console.print(Text("Suggested commands:", style="bold"))
+        for cmd in finding.suggested_commands:
+            console.print(f"  - {cmd}")
+        console.print()
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +509,113 @@ def show_port(
         view.asic,
         raw_keys=view.raw_keys.get("ASIC_DB"),
     )
+
+    # FINDINGS
+    console.print(Text("FINDINGS", style="bold magenta"))
+    if not view.findings:
+        console.print(Text("  No findings.", style="dim"))
+    else:
+        console.print()
+        for finding in view.findings:
+            _print_finding(finding)
+
+
+# ---------------------------------------------------------------------------
+# Step 4 — Consistency Checks
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="findings")
+def all_findings(
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name for docker_exec/orb_vm_exec mode",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
+    ),
+) -> None:
+    """Run consistency checks on all discovered ports."""
+    svc = PortService(
+        redis_client=SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+    )
+    port_views = svc.list_port_views()
+
+    all_f: list[Finding] = []
+    for pv in port_views:
+        all_f.extend(pv.findings)
+
+    console.print()
+    console.print(Text("Findings", style="bold cyan"))
+    console.print()
+
+    if not all_f:
+        console.print(Text("No findings found.", style="dim"))
+    else:
+        for finding in all_f:
+            _print_finding(finding)
+
+    console.print()
+
+
+@app.command(name="check-port")
+def check_port(
+    port_name: str = typer.Argument(..., help="Port name, e.g. Ethernet0"),
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name for docker_exec/orb_vm_exec mode",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
+    ),
+) -> None:
+    """Run consistency checks on a single port."""
+    svc = PortService(
+        redis_client=SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+    )
+    view = svc.get_port_view(port_name)
+
+    console.print()
+    console.print(
+        Text(f"Findings for {view.name}", style="bold cyan")
+    )
+    console.print()
+
+    if not view.findings:
+        console.print(Text(f"No findings for {view.name}.", style="dim"))
+    else:
+        for finding in view.findings:
+            _print_finding(finding)
+
+    console.print()
 
 
 if __name__ == "__main__":
