@@ -47,9 +47,15 @@ coverage.xml
 # ===== Jupyter Notebooks =====
 .ipynb_checkpoints/
 
+# ===== Node =====
+node_modules/
+
 # ===== OS Files =====
 .DS_Store
 Thumbs.db
+
+# ===== Node.js =====
+node_modules/
 
 # ===== Misc =====
 *.log

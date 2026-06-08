@@ -145,26 +145,6 @@ Every finding includes:
 
 ---
 
-## Design Principles
-
-### Evidence-based
-
-Every finding includes concrete evidence from the Redis DBs. No guessing. No "probably."
-
-### Soft on missing data
-
-Missing transceiver or counter data in SONiC VS is normal. These are `info` severity, not `warning`.
-
-### Never overclaims
-
-Findings say "Possible causes include..." — not "The root cause is definitely..."
-
-### Deterministic
-
-No LLM is involved at this step. All checks are pure Python logic. This means results are repeatable and debuggable.
-
----
-
 ## Connection Modes
 
 Same as previous steps. All three modes supported.
