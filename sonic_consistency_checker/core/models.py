@@ -99,3 +99,67 @@ class FindingsResponse(BaseModel):
     """A collection of consistency findings."""
 
     findings: list[Finding]
+
+
+# ── Step 4A models (Route / VLAN / LAG / Summary) ────────────────────
+
+
+class RouteDriftSummary(BaseModel):
+    """Summary of route table drift between APPL_DB and ASIC_DB."""
+
+    appl_route_count: int
+    asic_route_count: int
+    drift: int
+    status: Literal["ok", "drift", "unknown"]
+
+
+class VlanMembershipSummary(BaseModel):
+    """Summary of VLAN membership consistency."""
+
+    config_vlan_count: int
+    app_vlan_count: int
+    vlans_with_mismatch: list[str] = Field(default_factory=list)
+    status: Literal["ok", "mismatch", "unknown"]
+
+
+class LagMemberSummary(BaseModel):
+    """Summary of LAG member health."""
+
+    config_lag_count: int
+    app_lag_count: int
+    lags_with_mismatch: list[str] = Field(default_factory=list)
+    status: Literal["ok", "mismatch", "unknown"]
+
+
+class DiagnosticSummary(BaseModel):
+    """Aggregated diagnostic summary / health overview.
+
+    Combines port findings, route drift, VLAN membership, and LAG member
+    health into a single dashboard view.  Each subsystem has its own
+    status (``ok``, ``warning``, ``critical``) and the overall health
+    score is a quick 0–100 grade.
+    """
+
+    # Severity counts (across all findings — ports, routes, VLANs, LAGs)
+    total_findings: int
+    critical_count: int
+    warning_count: int
+    info_count: int
+
+    # Category groups
+    categories: dict[str, int] = Field(default_factory=dict)
+
+    # Subsystem summaries
+    port_checks: dict[str, int] = Field(default_factory=dict)
+    route_drift: RouteDriftSummary | None = None
+    vlan_membership: VlanMembershipSummary | None = None
+    lag_member_health: LagMemberSummary | None = None
+
+    # Overall health
+    overall_health_score: int = Field(
+        default=100,
+        ge=0,
+        le=100,
+        description="0 = critical issues, 100 = all clear",
+    )
+    overall_status: Literal["healthy", "warning", "critical"] = "healthy"

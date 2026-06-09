@@ -2,13 +2,21 @@
 
 Compares data across SONiC Redis DBs and produces structured Findings.
 Does NOT use an LLM. All checks are deterministic and evidence-based.
+
+Step 4A amends:
+- Item 4: APPL_DB write-back path covered for oper_status
+- Item 3: Route table drift, VLAN membership, LAG member health checks
+- Item 5: Route table scan capability
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sonic_consistency_checker.core.models import Finding, PortView
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(value: object) -> str:
@@ -67,6 +75,25 @@ class DiffEngine:
         return all_findings
 
     # ------------------------------------------------------------------
+    # Extended checks (Step 4A) — require RedisClient for broad scanning
+    # ------------------------------------------------------------------
+
+    def check_all(
+        self,
+        ports: list[PortView],
+        redis_client: Any = None,
+    ) -> list[Finding]:
+        """Run ALL checks: port checks + route/VLAN/LAG if redis_client provided."""
+        findings = self.check_ports(ports)
+
+        if redis_client is not None:
+            findings.extend(self.check_route_drift(redis_client))
+            findings.extend(self.check_vlan_membership(redis_client))
+            findings.extend(self.check_lag_member_health(redis_client))
+
+        return findings
+
+    # ------------------------------------------------------------------
     # Check 1: PORT_MISSING_IN_STATE_DB
     # ------------------------------------------------------------------
 
@@ -118,9 +145,19 @@ class DiffEngine:
         if admin != "up":
             return []
 
+        # Item 4 (Step 4A): Also check APPL_DB for oper_status.
+        # natsyncd and other services may write ASIC state changes
+        # directly to APPL_DB instead of STATE_DB.
         oper = _first_present(
             port.state, ["oper_status", "oper_state", "status"]
         )
+        oper_source = "STATE_DB"
+        if oper is None:
+            oper = _first_present(
+                port.app, ["oper_status", "oper_state", "status"]
+            )
+            oper_source = "APPL_DB"
+
         if _norm(oper) != "down":
             return []
 
@@ -138,7 +175,7 @@ class DiffEngine:
                     f"CONFIG_DB.PORT|{port.name}.admin_status": port.config.get(
                         "admin_status"
                     ),
-                    "STATE_DB.oper_status": oper,
+                    f"{oper_source}.oper_status": oper,
                     "raw_keys": port.raw_keys,
                 },
                 possible_causes=[
@@ -325,3 +362,405 @@ class DiffEngine:
                 ],
             )
         ]
+
+    # ══════════════════════════════════════════════════════════════════
+    # Step 4A — Non-port consistency checks
+    # ══════════════════════════════════════════════════════════════════
+
+    # ── Check 7: ROUTE_TABLE_DRIFT (Item 3 + Item 5) ───────────────
+
+    def check_route_drift(self, redis_client: Any) -> list[Finding]:
+        """Compare APPL_DB ROUTE_TABLE key count vs ASIC_DB route entry count.
+
+        This is the #1 SONiC operational inconsistency — route table drift
+        after warm reboot or orchagent restart.
+        """
+        findings: list[Finding] = []
+
+        # Count APPL_DB routes
+        try:
+            appl_routes = redis_client.scan_keys("APPL_DB", "ROUTE_TABLE:*")
+            appl_count = len(appl_routes)
+        except Exception as exc:
+            logger.warning("Could not scan APPL_DB ROUTE_TABLE: %s", exc)
+            appl_count = -1
+
+        # Count ASIC_DB route entries
+        try:
+            asic_routes = redis_client.scan_keys(
+                "ASIC_DB", "*SAI_OBJECT_TYPE_ROUTE_ENTRY*"
+            )
+            asic_count = len(asic_routes)
+        except Exception as exc:
+            logger.warning("Could not scan ASIC_DB route entries: %s", exc)
+            asic_count = -1
+
+        if appl_count < 0 or asic_count < 0:
+            findings.append(
+                Finding(
+                    id="route_table_drift:system",
+                    severity="warning",
+                    category="ROUTE_TABLE_DRIFT",
+                    object_type="route",
+                    object_name="system",
+                    summary=(
+                        "Could not determine route table drift — "
+                        "one or both DBs were unreachable."
+                    ),
+                    evidence={
+                        "APPL_DB route count": appl_count if appl_count >= 0 else "scan failed",
+                        "ASIC_DB route count": asic_count if asic_count >= 0 else "scan failed",
+                    },
+                    possible_causes=[
+                        "ASIC_DB or APPL_DB unreachable",
+                        "Redis connection issue",
+                    ],
+                    suggested_commands=[
+                        'redis-cli -n 0 keys "ROUTE_TABLE:*" | wc -l',
+                        'redis-cli -n 1 keys "*SAI_OBJECT_TYPE_ROUTE_ENTRY*" | wc -l',
+                        "show ip route summary",
+                    ],
+                )
+            )
+            return findings
+
+        if appl_count != asic_count:
+            drift = abs(appl_count - asic_count)
+            findings.append(
+                Finding(
+                    id="route_table_drift:system",
+                    severity="critical",
+                    category="ROUTE_TABLE_DRIFT",
+                    object_type="route",
+                    object_name="system",
+                    summary=(
+                        f"Route table drift detected: "
+                        f"APPL_DB has {appl_count} routes, "
+                        f"ASIC_DB has {asic_count} routes "
+                        f"(drift = {drift})."
+                    ),
+                    evidence={
+                        "APPL_DB ROUTE_TABLE count": appl_count,
+                        "ASIC_DB route entry count": asic_count,
+                        "drift": drift,
+                    },
+                    possible_causes=[
+                        "Orchagent restart — route reconciliation incomplete",
+                        "Warm reboot — ASIC state preserved but APPL_DB routes changed",
+                        "BGP session flap — routes withdrawn but ASIC not updated",
+                        "syncd backlog — ASIC_DB updates queued",
+                        "fpmsyncd lag — kernel routes not yet pushed to APPL_DB",
+                    ],
+                    suggested_commands=[
+                        "show ip route summary",
+                        "show ip bgp summary",
+                        'redis-cli -n 0 keys "ROUTE_TABLE:*" | wc -l',
+                        'redis-cli -n 1 keys "*ROUTE_ENTRY*" | wc -l',
+                        "docker exec swss supervisorctl status orchagent",
+                    ],
+                )
+            )
+
+        return findings
+
+    # ── Check 8: VLAN_MEMBERSHIP_MISMATCH (Item 3) ─────────────────
+
+    def check_vlan_membership(self, redis_client: Any) -> list[Finding]:
+        """Check VLAN membership consistency between CONFIG_DB and APPL_DB.
+
+        CONFIG_DB VLAN_MEMBER says port X is in VLAN 100, but
+        APPL_DB VLAN_TABLE may not reflect it.
+        """
+        findings: list[Finding] = []
+
+        # Scan CONFIG_DB VLAN members
+        try:
+            config_vlan_keys = redis_client.scan_keys(
+                "CONFIG_DB", "VLAN_MEMBER|*"
+            )
+        except Exception as exc:
+            logger.warning("Could not scan CONFIG_DB VLAN_MEMBER: %s", exc)
+            return findings
+
+        # Scan APPL_DB VLAN tables
+        try:
+            app_vlan_keys = redis_client.scan_keys(
+                "APPL_DB", "VLAN_TABLE:*"
+            )
+        except Exception as exc:
+            logger.warning("Could not scan APPL_DB VLAN_TABLE: %s", exc)
+            app_vlan_keys = []
+
+        if not config_vlan_keys:
+            return findings  # No VLANs configured — nothing to check
+
+        # Build set of (vlan, member) from CONFIG_DB
+        config_members: set[tuple[str, str]] = set()
+        for key in config_vlan_keys:
+            # Key format: VLAN_MEMBER|Vlan100|Ethernet0
+            parts = key.split("|")
+            if len(parts) >= 3 and parts[0] == "VLAN_MEMBER":
+                vlan = parts[1]
+                member = parts[2]
+                config_members.add((vlan, member))
+
+        # Build set of VLANs and their member ports from APPL_DB
+        app_members: set[tuple[str, str]] = set()
+        vlans_seen: set[str] = set()
+        for key in app_vlan_keys:
+            # Key format: VLAN_TABLE:Vlan100 or VLAN_TABLE:Vlan100:Ethernet0
+            parts = key.split(":")
+            if len(parts) >= 2:
+                vlan = parts[1]
+                vlans_seen.add(vlan)
+                # Read members from APPL_DB
+                try:
+                    vlan_data = redis_client.hgetall("APPL_DB", key)
+                    for field_name in vlan_data:
+                        if field_name.startswith("member") or field_name == "members":
+                            # Member fields may reference port names
+                            pass
+                    # Also scan for VLAN_MEMBER keys in APPL_DB
+                except Exception:
+                    pass
+
+        # Alternative approach: scan APPL_DB for VLAN_MEMBER:*
+        try:
+            app_vlan_member_keys = redis_client.scan_keys(
+                "APPL_DB", "VLAN_MEMBER:*"
+            )
+            for key in app_vlan_member_keys:
+                # Key format: VLAN_MEMBER:Vlan100:Ethernet0
+                parts = key.split(":")
+                if len(parts) >= 3 and parts[0] == "VLAN_MEMBER":
+                    vlan = parts[1]
+                    member = parts[2]
+                    app_members.add((vlan, member))
+        except Exception:
+            pass
+
+        # Compare
+        missing_in_app = config_members - app_members
+        extra_in_app = app_members - config_members
+
+        for vlan, member in sorted(missing_in_app):
+            findings.append(
+                Finding(
+                    id=f"vlan_membership_mismatch:{vlan}:{member}",
+                    severity="warning",
+                    category="VLAN_MEMBERSHIP_MISMATCH",
+                    object_type="vlan",
+                    object_name=f"{vlan}/{member}",
+                    summary=(
+                        f"Port {member} is in VLAN {vlan} per CONFIG_DB "
+                        f"but not found in APPL_DB VLAN_MEMBER."
+                    ),
+                    evidence={
+                        "CONFIG_DB VLAN_MEMBER": f"{vlan}|{member}",
+                        "APPL_DB VLAN_MEMBER": "missing",
+                    },
+                    possible_causes=[
+                        "vlanmgrd has not processed the VLAN config change yet",
+                        "vlanmgrd service is down or restarting",
+                        "VLAN creation failed",
+                        "Schema/key separator mismatch",
+                    ],
+                    suggested_commands=[
+                        f'redis-cli -n 4 hgetall "VLAN_MEMBER|{vlan}|{member}"',
+                        f'redis-cli -n 0 hgetall "VLAN_MEMBER:{vlan}:{member}"',
+                        f"show vlan brief",
+                        "docker exec swss supervisorctl status vlanmgrd",
+                    ],
+                )
+            )
+
+        for vlan, member in sorted(extra_in_app):
+            findings.append(
+                Finding(
+                    id=f"vlan_membership_extra:{vlan}:{member}",
+                    severity="info",
+                    category="VLAN_MEMBERSHIP_MISMATCH",
+                    object_type="vlan",
+                    object_name=f"{vlan}/{member}",
+                    summary=(
+                        f"Port {member} appears in APPL_DB VLAN_MEMBER "
+                        f"for {vlan} but no matching CONFIG_DB entry found."
+                    ),
+                    evidence={
+                        "CONFIG_DB VLAN_MEMBER": "missing",
+                        "APPL_DB VLAN_MEMBER": f"{vlan}/{member}",
+                    },
+                    possible_causes=[
+                        "Stale APPL_DB state after VLAN deletion",
+                        "Manual Redis write without config",
+                        "Schema/key separator mismatch",
+                    ],
+                    suggested_commands=[
+                        f'redis-cli -n 0 keys "VLAN_MEMBER:{vlan}:*"',
+                        f"show vlan brief",
+                    ],
+                )
+            )
+
+        return findings
+
+    # ── Check 9: LAG_MEMBER_MISMATCH (Item 3) ──────────────────────
+
+    def check_lag_member_health(self, redis_client: Any) -> list[Finding]:
+        """Check LAG member consistency between CONFIG_DB and APPL_DB.
+
+        CONFIG_DB PORTCHANNEL member list vs APPL_DB LAG_TABLE state.
+        """
+        findings: list[Finding] = []
+
+        # Scan CONFIG_DB PORTCHANNEL
+        try:
+            config_lag_keys = redis_client.scan_keys(
+                "CONFIG_DB", "PORTCHANNEL|*"
+            )
+        except Exception as exc:
+            logger.warning("Could not scan CONFIG_DB PORTCHANNEL: %s", exc)
+            return findings
+
+        if not config_lag_keys:
+            return findings  # No LAGs configured
+
+        # Scan APPL_DB LAG_TABLE
+        try:
+            app_lag_keys = redis_client.scan_keys(
+                "APPL_DB", "LAG_TABLE:*"
+            )
+        except Exception as exc:
+            logger.warning("Could not scan APPL_DB LAG_TABLE: %s", exc)
+            app_lag_keys = []
+
+        for key in config_lag_keys:
+            # Key format: PORTCHANNEL|PortChannel001
+            parts = key.split("|")
+            if len(parts) < 2:
+                continue
+            lag_name = parts[1]
+
+            # Read CONFIG_DB LAG members
+            try:
+                config_data = redis_client.hgetall("CONFIG_DB", key)
+            except Exception:
+                config_data = {}
+
+            config_member_list = config_data.get(
+                "members", config_data.get("member", "")
+            )
+            config_members: set[str] = set()
+            if config_member_list:
+                config_members = set(
+                    m.strip() for m in config_member_list.split(",") if m.strip()
+                )
+
+            # Read APPL_DB LAG state
+            app_members: set[str] = set()
+            for ak in app_lag_keys:
+                if lag_name in ak:
+                    try:
+                        app_data = redis_client.hgetall("APPL_DB", ak)
+                        for field_name, field_val in app_data.items():
+                            if "member" in field_name.lower():
+                                app_members.add(field_val.strip())
+                    except Exception:
+                        pass
+
+            # Compare
+            if config_members and app_members:
+                missing = config_members - app_members
+                extra = app_members - config_members
+
+                for member in sorted(missing):
+                    findings.append(
+                        Finding(
+                            id=f"lag_member_mismatch:{lag_name}:{member}",
+                            severity="warning",
+                            category="LAG_MEMBER_MISMATCH",
+                            object_type="lag",
+                            object_name=f"{lag_name}/{member}",
+                            summary=(
+                                f"Port {member} is a member of LAG {lag_name} "
+                                f"in CONFIG_DB but not found in APPL_DB."
+                            ),
+                            evidence={
+                                f"CONFIG_DB.{key}.members": list(config_members),
+                                "APPL_DB LAG_TABLE members": list(app_members),
+                                "missing": list(missing),
+                            },
+                            possible_causes=[
+                                "teamsyncd has not processed the LAG config yet",
+                                "teamd service is down or restarting",
+                                "LAG creation failed — member ports may be down",
+                                "Schema/key separator mismatch",
+                            ],
+                            suggested_commands=[
+                                f'redis-cli -n 4 hgetall "{key}"',
+                                f'redis-cli -n 0 hgetall "LAG_TABLE:{lag_name}"',
+                                f"show interfaces portchannel",
+                                "docker exec teamd supervisorctl status teamd",
+                            ],
+                        )
+                    )
+
+                for member in sorted(extra):
+                    findings.append(
+                        Finding(
+                            id=f"lag_member_extra:{lag_name}:{member}",
+                            severity="info",
+                            category="LAG_MEMBER_MISMATCH",
+                            object_type="lag",
+                            object_name=f"{lag_name}/{member}",
+                            summary=(
+                                f"Port {member} appears in APPL_DB LAG_TABLE "
+                                f"for {lag_name} but not in CONFIG_DB."
+                            ),
+                            evidence={
+                                f"CONFIG_DB.{key}.members": list(config_members),
+                                "APPL_DB LAG_TABLE members": list(app_members),
+                                "extra": list(extra),
+                            },
+                            possible_causes=[
+                                "Stale APPL_DB state after LAG member removal",
+                                "Manual Redis write without config",
+                                "teamsyncd stale state",
+                            ],
+                            suggested_commands=[
+                                f'redis-cli -n 0 keys "LAG_TABLE:{lag_name}*"',
+                                f"show interfaces portchannel",
+                            ],
+                        )
+                    )
+
+            elif config_members and not app_members:
+                findings.append(
+                    Finding(
+                        id=f"lag_missing_app:{lag_name}",
+                        severity="warning",
+                        category="LAG_MEMBER_MISMATCH",
+                        object_type="lag",
+                        object_name=lag_name,
+                        summary=(
+                            f"LAG {lag_name} has {len(config_members)} members "
+                            f"in CONFIG_DB but no APPL_DB LAG_TABLE state found."
+                        ),
+                        evidence={
+                            f"CONFIG_DB.{key}.members": list(config_members),
+                            "APPL_DB LAG_TABLE": "not found",
+                        },
+                        possible_causes=[
+                            "teamd service is not running",
+                            "teamsyncd has not processed the LAG config",
+                            "LAG has not been created yet",
+                        ],
+                        suggested_commands=[
+                            "show interfaces portchannel",
+                            "docker exec teamd supervisorctl status teamd",
+                            f'redis-cli -n 0 keys "LAG_TABLE:*"',
+                        ],
+                    )
+                )
+
+        return findings
