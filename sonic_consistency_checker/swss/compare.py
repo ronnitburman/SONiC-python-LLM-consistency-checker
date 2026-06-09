@@ -5,16 +5,29 @@ from __future__ import annotations
 from typing import Any
 
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
-from sonic_consistency_checker.swss.config_db import ConfigDbReader
+from sonic_consistency_checker.swss.config_db import (
+    ConfigDbReader,
+    RemoteConfigDbReader,
+)
 
 
 class SwssCompareService:
-    """Compares raw Redis HGETALL output with SWSS SDK ConfigDBConnector."""
+    """Compares raw Redis HGETALL output with SWSS SDK ConfigDBConnector.
+
+    Supports two SDK modes:
+
+    * **local** (default) — imports ``swsssdk`` in the current process.
+      Only works inside the SONiC container.
+    * **remote** — tunnels the SDK call through
+      ``orb exec → docker exec python3 -c``.  Works from any machine
+      that can reach the orb VM.  Activated by passing
+      ``sdk_mode='remote'`` and a configured ``SonicRedisClient``.
+    """
 
     def __init__(
         self,
         redis_client: SonicRedisClient | None = None,
-        config_reader: ConfigDbReader | None = None,
+        config_reader: ConfigDbReader | RemoteConfigDbReader | None = None,
     ) -> None:
         self.redis_client = redis_client or SonicRedisClient()
         self.config_reader = config_reader or ConfigDbReader()

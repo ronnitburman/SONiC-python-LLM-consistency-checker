@@ -11,11 +11,18 @@ from pydantic import BaseModel, Field
 
 
 class DbSizeSummary(BaseModel):
-    """Size summary for a single SONiC Redis database."""
+    """Size summary for a single SONiC Redis database.
+
+    When `error` is set, the connection/query failed — `size` will be -1
+    and the error message explains why.  A size of 0 means the DB was
+    reached successfully but is empty; -1 *without* an error field means
+    the legacy path (treat as suspicious).
+    """
 
     db_name: str
     db_id: int
     size: int
+    error: str | None = None
 
 
 class SonicDbKey(BaseModel):

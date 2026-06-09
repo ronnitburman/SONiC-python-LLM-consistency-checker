@@ -12,24 +12,27 @@ pip install -e .
 # Check SDK availability
 sonic-checker swss check
 
-# Read CONFIG_DB through ConfigDBConnector
+# Read CONFIG_DB through ConfigDBConnector (local — requires swsssdk installed)
 sonic-checker swss config-table PORT
 sonic-checker swss config-entry PORT Ethernet0
 
-# Use SonicV2Connector
-sonic-checker swss v2-keys CONFIG_DB "PORT*"
-sonic-checker swss v2-hgetall CONFIG_DB "PORT|Ethernet0"
+# OR run remotely through orb VM (no local swsssdk needed!)
+sonic-checker swss config-table PORT -m orb_vm_exec
+sonic-checker swss config-entry PORT Ethernet0 -m orb_vm_exec
+sonic-checker swss v2-keys CONFIG_DB "PORT*" -m orb_vm_exec
+sonic-checker swss v2-hgetall CONFIG_DB "PORT|Ethernet0" -m orb_vm_exec
 
-# Table-oriented reads via raw Redis
-sonic-checker swss table CONFIG_DB PORT
-sonic-checker swss table-entry CONFIG_DB PORT Ethernet0
+# Table-oriented reads via raw Redis (always works with -m)
+sonic-checker swss table CONFIG_DB PORT -m orb_vm_exec
+sonic-checker swss table-entry CONFIG_DB PORT Ethernet0 -m orb_vm_exec
 
-# Compare raw Redis vs SWSS SDK
-sonic-checker swss compare-read PORT Ethernet0
+# Compare raw Redis vs SWSS SDK — now works remotely!
+sonic-checker swss compare-read PORT Ethernet0 -m orb_vm_exec
 
-# Run API
+# Run API (set SONIC_CONNECTION_MODE=orb_vm_exec in .env for remote SDK)
 uvicorn sonic_consistency_checker.api.main:app --reload
 curl http://localhost:8000/api/swss/check
+curl "http://localhost:8000/api/swss/config/PORT?connection_mode=orb_vm_exec"
 curl http://localhost:8000/api/swss/compare/config/PORT/Ethernet0
 ```
 
@@ -51,9 +54,34 @@ The SWSS SDK layer helps you understand the SONiC-native access patterns used by
 
 ---
 
-## Important: SDK is Optional
+## Important: SDK is Optional (Two Ways to Use It)
 
-SWSS SDK (`swsssdk`, `swsscommon`) may only be available inside the SONiC container. The tool **never crashes** on import errors. Instead:
+SWSS SDK (`swsssdk`, `swsscommon`) may only be available inside the SONiC container. The tool offers **two ways** to use it:
+
+### Option 1: Local (inside SONiC container)
+
+Run the checker from *inside* the SONiC container where `swsssdk` is installed:
+
+```bash
+docker exec -it clab-sonic-ai-lab-sonic1 bash
+pip install -e /path/to/sonic_consistency_checker
+sonic-checker swss config-table PORT
+```
+
+### Option 2: Remote (from your Mac / any machine)
+
+Pass `-m orb_vm_exec` (or `-m docker_exec`) to tunnel the SDK calls through the orb VM. The checker ships a small Python script into the container, runs it there, and returns the result — **no local swsssdk install needed**:
+
+```bash
+# From your Mac:
+sonic-checker swss config-table PORT -m orb_vm_exec
+sonic-checker swss v2-keys CONFIG_DB "PORT*" -m orb_vm_exec
+sonic-checker swss compare-read PORT Ethernet0 -m orb_vm_exec
+```
+
+Under the hood: `orb exec -m <vm> docker exec <container> python3 -c "import swsssdk; ..."`
+
+The tool **never crashes** on local import errors. Instead:
 
 ```
 SWSS SDK Status
@@ -82,20 +110,30 @@ Reports whether `swsssdk` and `swsscommon` are importable.
 ### `sonic-checker swss config-table` / `config-entry` — ConfigDBConnector
 
 ```bash
+# Local (requires swsssdk installed in this Python environment)
 sonic-checker swss config-table PORT
 sonic-checker swss config-entry PORT Ethernet0
+
+# Remote (tunnels through orb VM — no local swsssdk needed)
+sonic-checker swss config-table PORT -m orb_vm_exec
+sonic-checker swss config-entry PORT Ethernet0 -m orb_vm_exec
 ```
 
-Reads CONFIG_DB through the SONiC-native `ConfigDBConnector` abstraction. Shows the equivalent `redis-cli` command for comparison.
+Reads CONFIG_DB through the SONiC-native `ConfigDBConnector` abstraction. In remote mode, serialises the SDK call, ships it into the container via `orb exec → docker exec python3 -c`, and returns the parsed JSON result.
 
 ### `sonic-checker swss v2-keys` / `v2-hgetall` — SonicV2Connector
 
 ```bash
+# Local
 sonic-checker swss v2-keys CONFIG_DB "PORT*"
 sonic-checker swss v2-hgetall CONFIG_DB "PORT|Ethernet0"
+
+# Remote
+sonic-checker swss v2-keys CONFIG_DB "PORT*" -m orb_vm_exec
+sonic-checker swss v2-hgetall CONFIG_DB "PORT|Ethernet0" -m orb_vm_exec
 ```
 
-Accesses SONiC DBs by logical DB name through `SonicV2Connector`.
+Accesses SONiC DBs by logical DB name through `SonicV2Connector`. Same remote execution pattern as ConfigDBConnector.
 
 ### `sonic-checker swss table` / `table-entry` — Table-oriented reads
 
@@ -109,6 +147,10 @@ Uses the existing raw Redis client but presents data with a table-oriented menta
 ### `sonic-checker swss compare-read` — Compare raw Redis vs SDK
 
 ```bash
+# Local
+sonic-checker swss compare-read PORT Ethernet0
+
+# Remote (both raw Redis AND SDK tunnel through orb VM)
 sonic-checker swss compare-read PORT Ethernet0 -m orb_vm_exec
 ```
 

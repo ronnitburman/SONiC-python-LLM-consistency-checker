@@ -2,20 +2,45 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Query
 
+from sonic_consistency_checker.core.redis_client import SonicRedisClient
 from sonic_consistency_checker.swss.connector import swss_available
-from sonic_consistency_checker.swss.config_db import ConfigDbReader
-from sonic_consistency_checker.swss.sonic_v2 import SonicV2Reader
+from sonic_consistency_checker.swss.config_db import (
+    ConfigDbReader,
+    RemoteConfigDbReader,
+)
+from sonic_consistency_checker.swss.sonic_v2 import (
+    SonicV2Reader,
+    RemoteSonicV2Reader,
+)
 from sonic_consistency_checker.swss.table_reader import SwssTableReader
 from sonic_consistency_checker.swss.table_writer import SwssTableWriter
 from sonic_consistency_checker.swss.compare import SwssCompareService
 
 router = APIRouter(prefix="/api/swss", tags=["swss"])
 
-# Shared instances
-config_reader = ConfigDbReader()
-v2_reader = SonicV2Reader()
+
+# ── Reader factories (auto-select local vs remote based on .env) ────
+
+
+def _get_config_reader() -> ConfigDbReader | RemoteConfigDbReader:
+    mode = os.getenv("SONIC_CONNECTION_MODE", "")
+    if mode in ("docker_exec", "orb_vm_exec"):
+        return RemoteConfigDbReader(redis_client=SonicRedisClient())
+    return ConfigDbReader()
+
+
+def _get_v2_reader() -> SonicV2Reader | RemoteSonicV2Reader:
+    mode = os.getenv("SONIC_CONNECTION_MODE", "")
+    if mode in ("docker_exec", "orb_vm_exec"):
+        return RemoteSonicV2Reader(redis_client=SonicRedisClient())
+    return SonicV2Reader()
+
+
+# Shared instances (table reader / writer always work via raw Redis)
 table_reader = SwssTableReader()
 table_writer = SwssTableWriter()
 compare_svc = SwssCompareService()
@@ -34,13 +59,13 @@ async def check_swss() -> dict:
 @router.get("/config/{table}")
 async def config_table(table: str) -> dict:
     """Read a CONFIG_DB table via ConfigDBConnector."""
-    return config_reader.get_table(table)
+    return _get_config_reader().get_table(table)
 
 
 @router.get("/config/{table}/{key}")
 async def config_entry(table: str, key: str) -> dict:
     """Read a CONFIG_DB entry via ConfigDBConnector."""
-    return config_reader.get_entry(table, key)
+    return _get_config_reader().get_entry(table, key)
 
 
 # ── SonicV2Connector ─────────────────────────────────────────────────
@@ -51,7 +76,7 @@ async def v2_keys(
     pattern: str = Query("*", description="Key pattern"),
 ) -> dict:
     """Scan keys via SonicV2Connector."""
-    return v2_reader.keys(db_name, pattern)
+    return _get_v2_reader().keys(db_name, pattern)
 
 
 @router.get("/v2/{db_name}/key")
@@ -60,7 +85,7 @@ async def v2_hgetall(
     key: str = Query(..., description="Redis key"),
 ) -> dict:
     """HGETALL via SonicV2Connector."""
-    return v2_reader.get_all(db_name, key)
+    return _get_v2_reader().get_all(db_name, key)
 
 
 # ── Table-oriented reads ─────────────────────────────────────────────

@@ -16,8 +16,8 @@ from sonic_consistency_checker.core.redis_client import SonicRedisClient
 from sonic_consistency_checker.core.models import Finding
 from sonic_consistency_checker.sonic.ports import PortService
 from sonic_consistency_checker.swss.connector import swss_available
-from sonic_consistency_checker.swss.config_db import ConfigDbReader
-from sonic_consistency_checker.swss.sonic_v2 import SonicV2Reader
+from sonic_consistency_checker.swss.config_db import ConfigDbReader, RemoteConfigDbReader
+from sonic_consistency_checker.swss.sonic_v2 import SonicV2Reader, RemoteSonicV2Reader
 from sonic_consistency_checker.swss.table_reader import SwssTableReader
 from sonic_consistency_checker.swss.table_writer import SwssTableWriter
 from sonic_consistency_checker.swss.compare import SwssCompareService
@@ -632,6 +632,50 @@ swss_app = typer.Typer(help="Explore SONiC SWSS SDK operations.")
 app.add_typer(swss_app, name="swss")
 
 
+# ── SWSS helper factories ───────────────────────────────────────────
+
+
+def _swss_config_reader(
+    connection_mode: str | None,
+    container_name: str | None,
+    orb_vm_name: str | None,
+) -> ConfigDbReader | RemoteConfigDbReader:
+    """Return the appropriate ConfigDbReader for the connection mode.
+
+    When *connection_mode* is ``docker_exec`` or ``orb_vm_exec`` we use
+    ``RemoteConfigDbReader`` which tunnels the SDK call through the orb
+    VM.  Otherwise (local/None) we try the local ``ConfigDbReader``
+    (which will fail gracefully if swsssdk isn't installed).
+    """
+    if connection_mode in ("docker_exec", "orb_vm_exec"):
+        client = SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+        return RemoteConfigDbReader(redis_client=client)
+    return ConfigDbReader()
+
+
+def _swss_v2_reader(
+    connection_mode: str | None,
+    container_name: str | None,
+    orb_vm_name: str | None,
+) -> SonicV2Reader | RemoteSonicV2Reader:
+    """Return the appropriate SonicV2Reader for the connection mode."""
+    if connection_mode in ("docker_exec", "orb_vm_exec"):
+        client = SonicRedisClient(
+            connection_mode=connection_mode,
+            container_name=container_name,
+            orb_vm_name=orb_vm_name,
+        )
+        return RemoteSonicV2Reader(redis_client=client)
+    return SonicV2Reader()
+
+
+# ── SWSS commands ────────────────────────────────────────────────────
+
+
 @swss_app.command(name="check")
 def swss_check() -> None:
     """Check SWSS SDK availability in this Python environment."""
@@ -656,9 +700,21 @@ def swss_check() -> None:
 @swss_app.command(name="config-table")
 def swss_config_table(
     table: str = typer.Argument(..., help="Table name, e.g. PORT"),
+    connection_mode: Optional[str] = typer.Option(
+        None, "--connection-mode", "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None, "--container-name", "-c",
+        help="Docker container name",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None, "--orb-vm-name",
+        help="OrbStack VM name (auto-detected if omitted)",
+    ),
 ) -> None:
-    """Read a CONFIG_DB table via ConfigDBConnector."""
-    reader = ConfigDbReader()
+    """Read a CONFIG_DB table via ConfigDBConnector (local or remote)."""
+    reader = _swss_config_reader(connection_mode, container_name, orb_vm_name)
     result = reader.get_table(table)
     _print_swss_result(table, result)
 
@@ -667,9 +723,21 @@ def swss_config_table(
 def swss_config_entry(
     table: str = typer.Argument(..., help="Table name, e.g. PORT"),
     key: str = typer.Argument(..., help="Key, e.g. Ethernet0"),
+    connection_mode: Optional[str] = typer.Option(
+        None, "--connection-mode", "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None, "--container-name", "-c",
+        help="Docker container name",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None, "--orb-vm-name",
+        help="OrbStack VM name (auto-detected if omitted)",
+    ),
 ) -> None:
-    """Read a CONFIG_DB entry via ConfigDBConnector."""
-    reader = ConfigDbReader()
+    """Read a CONFIG_DB entry via ConfigDBConnector (local or remote)."""
+    reader = _swss_config_reader(connection_mode, container_name, orb_vm_name)
     result = reader.get_entry(table, key)
     _print_swss_result(f"{table}/{key}", result)
 
@@ -678,9 +746,21 @@ def swss_config_entry(
 def swss_v2_keys(
     db_name: str = typer.Argument(..., help="DB name, e.g. CONFIG_DB"),
     pattern: str = typer.Argument("*", help="Key pattern, e.g. PORT*"),
+    connection_mode: Optional[str] = typer.Option(
+        None, "--connection-mode", "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None, "--container-name", "-c",
+        help="Docker container name",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None, "--orb-vm-name",
+        help="OrbStack VM name (auto-detected if omitted)",
+    ),
 ) -> None:
-    """Scan keys via SonicV2Connector."""
-    reader = SonicV2Reader()
+    """Scan keys via SonicV2Connector (local or remote)."""
+    reader = _swss_v2_reader(connection_mode, container_name, orb_vm_name)
     result = reader.keys(db_name, pattern)
     _print_swss_result(f"{db_name} keys", result)
 
@@ -689,9 +769,21 @@ def swss_v2_keys(
 def swss_v2_hgetall(
     db_name: str = typer.Argument(..., help="DB name, e.g. CONFIG_DB"),
     key: str = typer.Argument(..., help="Redis key, e.g. PORT|Ethernet0"),
+    connection_mode: Optional[str] = typer.Option(
+        None, "--connection-mode", "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None, "--container-name", "-c",
+        help="Docker container name",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None, "--orb-vm-name",
+        help="OrbStack VM name (auto-detected if omitted)",
+    ),
 ) -> None:
-    """HGETALL via SonicV2Connector."""
-    reader = SonicV2Reader()
+    """HGETALL via SonicV2Connector (local or remote)."""
+    reader = _swss_v2_reader(connection_mode, container_name, orb_vm_name)
     result = reader.get_all(db_name, key)
     _print_swss_result(f"{db_name}/{key}", result)
 
@@ -815,13 +907,18 @@ def swss_compare_read(
     ),
 ) -> None:
     """Compare raw Redis read with SWSS SDK read for a CONFIG_DB entry."""
-    svc = SwssCompareService(
-        redis_client=SonicRedisClient(
-            connection_mode=connection_mode,
-            container_name=container_name,
-            orb_vm_name=orb_vm_name,
-        )
+    client = SonicRedisClient(
+        connection_mode=connection_mode,
+        container_name=container_name,
+        orb_vm_name=orb_vm_name,
     )
+    # Use remote SDK reader when tunneled; local otherwise.
+    sdk_reader: ConfigDbReader | RemoteConfigDbReader
+    if connection_mode in ("docker_exec", "orb_vm_exec"):
+        sdk_reader = RemoteConfigDbReader(redis_client=client)
+    else:
+        sdk_reader = ConfigDbReader()
+    svc = SwssCompareService(redis_client=client, config_reader=sdk_reader)
     result = svc.compare_config_entry(table, key)
 
     console.print()
