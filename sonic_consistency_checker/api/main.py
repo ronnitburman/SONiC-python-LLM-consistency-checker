@@ -12,6 +12,7 @@ from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
 from sonic_consistency_checker.api.routes_dbs import router as dbs_router
 from sonic_consistency_checker.api.routes_ports import router as ports_router
 from sonic_consistency_checker.api.routes_findings import router as findings_router
+from sonic_consistency_checker.api.routes_swss import router as swss_router
 
 load_dotenv()
 
@@ -23,6 +24,7 @@ app = FastAPI(
 app.include_router(dbs_router)
 app.include_router(ports_router)
 app.include_router(findings_router)
+app.include_router(swss_router)
 
 
 @app.get("/health")

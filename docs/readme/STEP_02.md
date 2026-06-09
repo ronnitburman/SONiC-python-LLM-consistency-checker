@@ -310,17 +310,3 @@ sonic_consistency_checker/
     main.py                  # FastAPI /health, /api/db-config, /api/dbs/...
     routes_dbs.py            # /api/dbs router
 ```
-
----
-
-## Key Design Decisions
-
-| Decision | Why |
-|---|---|
-| DB IDs resolved via `get_db_id(db_name)` | Never hardcoded — uses dynamic config from Step 1 |
-| `SCAN` not `KEYS` | `KEYS` blocks Redis on large DBs; `SCAN` uses cursor iteration |
-| `SonicDiscoveryService` as intermediate layer | Keeps CLI/API thin; all business logic lives in one place |
-| Separate `redis_client.py` for Redis operations | Clean separation: config loading vs. Redis operations vs. service layer |
-| `Equivalent Redis` in every response | Helps users understand what's happening under the hood |
-| Graceful errors on unreadable DBs | One broken DB doesn't crash `sonic-checker dbs` |
-| Same connection modes as Step 1 | Consistency — `docker_exec`, `orb_vm_exec`, plus `local_redis` for direct access |

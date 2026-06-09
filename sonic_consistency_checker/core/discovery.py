@@ -36,17 +36,22 @@ class SonicDiscoveryService:
 
         for db_name in sorted(self.redis_client.databases.keys()):
             db_id = self.redis_client.databases[db_name].id
+            err_msg: str | None = None
             try:
                 size = self.redis_client.dbsize(db_name)
             except (SonicRedisError, ValueError, Exception) as exc:
                 logger.warning("Could not read dbsize for %s: %s", db_name, exc)
                 size = -1
+                err_msg = str(exc).strip()
+                if not err_msg:
+                    err_msg = type(exc).__name__
 
             results.append(
                 DbSizeSummary(
                     db_name=db_name,
                     db_id=db_id,
                     size=size,
+                    error=err_msg,
                 )
             )
 

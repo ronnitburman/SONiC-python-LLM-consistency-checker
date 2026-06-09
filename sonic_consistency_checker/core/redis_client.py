@@ -6,6 +6,7 @@ All Redis operations resolve DB IDs dynamically via get_db_id().
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from typing import Any
@@ -163,6 +164,75 @@ class SonicRedisClient:
         """Build a human-readable equivalent redis-cli command."""
         db_id = self.get_db_id(db_name)
         return f'redis-cli -n {db_id} type "{key}"'
+
+    # ------------------------------------------------------------------
+    # Remote Python execution (for SWSS SDK inside the container)
+    # ------------------------------------------------------------------
+
+    def run_python_remote(self, code: str) -> str:
+        """Execute Python *code* inside the SONiC container and return stdout.
+
+        Used by the SWSS SDK layer (Step 5) to run ``ConfigDBConnector``,
+        ``SonicV2Connector``, etc. inside the container where those
+        libraries actually exist.  Follows the same ``orb exec → docker
+        exec`` tunnel pattern as ``_run_redis_cli()``.
+
+        The *code* must ``print()`` a single JSON line to stdout.
+        Runtime errors inside the container are caught, serialised as
+        ``{"__error__": true, "message": "..."}``, and raised as
+        ``SonicRedisError`` on this side.
+        """
+        # Wrap user code so exceptions inside the container become
+        # structured JSON instead of a traceback the caller can't parse.
+        wrapped = (
+            "import json, sys, traceback\n"
+            "try:\n"
+            + "\n".join(f"    {line}" for line in code.strip().split("\n"))
+            + "\n"
+            "except Exception as _sonic_exc:\n"
+            "    print(json.dumps({'__error__': True, "
+            "'message': str(_sonic_exc), "
+            "'traceback': traceback.format_exc()}))\n"
+            "    sys.exit(1)\n"
+        )
+
+        if self.connection_mode == "orb_vm_exec":
+            vm = self.orb_vm_name or self._detect_orb_vm()
+            if not vm:
+                raise SonicRedisError(
+                    "orb_vm_exec mode but no Orb VM detected"
+                )
+            command = [
+                "orb", "exec", "-m", vm,
+                "docker", "exec", self.container_name,
+                "python3", "-c", wrapped,
+            ]
+        else:
+            command = [
+                "docker", "exec", self.container_name,
+                "python3", "-c", wrapped,
+            ]
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            # Try to extract the structured error from stdout.
+            try:
+                err_data = json.loads(result.stdout.strip())
+                if err_data.get("__error__"):
+                    raise SonicRedisError(err_data.get("message", "unknown"))
+            except (json.JSONDecodeError, KeyError):
+                pass
+            raise SonicRedisError(
+                result.stderr.strip() or "python3 remote execution failed"
+            )
+
+        return result.stdout
 
     # ------------------------------------------------------------------
     # Private helpers — local_redis mode
