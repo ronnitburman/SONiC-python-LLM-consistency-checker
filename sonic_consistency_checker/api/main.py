@@ -6,6 +6,7 @@ import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
@@ -19,6 +20,19 @@ load_dotenv()
 app = FastAPI(
     title="SONiC Consistency Checker API",
     version="0.1.0",
+)
+
+# Allow the Vite dev server to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://ronnit-sonic-project.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(dbs_router)
