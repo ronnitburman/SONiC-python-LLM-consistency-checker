@@ -1,0 +1,469 @@
+/* ── Base ─────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #f6f7f9;
+  color: #111827;
+}
+
+/* ── App Shell ────────────────────────────────────────────────────── */
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.header {
+  background: #111827;
+  color: white;
+  padding: 1rem 1.5rem;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.nav {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+}
+
+.nav button {
+  border: 1px solid #9ca3af;
+  background: #e5e7eb;
+  color: #374151;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav button:hover {
+  background: #d1d5db;
+  color: #111827;
+}
+
+.nav button.active {
+  background: #111827;
+  color: white;
+  border-color: #111827;
+}
+
+.page {
+  padding: 1.5rem;
+  max-width: 1200px;
+}
+
+/* ── Cards & Sections ─────────────────────────────────────────────── */
+
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card h2,
+.card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.section {
+  margin-bottom: 1.5rem;
+}
+
+.section h3 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+  color: #374151;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.grid-2 {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+}
+
+/* ── JSON Viewer ──────────────────────────────────────────────────── */
+
+.json-viewer {
+  background: #0f172a;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow: auto;
+  font-size: 0.85rem;
+  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Badges ───────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid #d1d5db;
+}
+
+.badge-ok {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+.badge-warning {
+  background: #fef3c7;
+  border-color: #facc15;
+  color: #92400e;
+}
+
+.badge-error,
+.badge-critical {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+.badge-neutral,
+.badge-info {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+/* ── Form inputs ──────────────────────────────────────────────────── */
+
+input,
+select {
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.4rem;
+  font-size: 0.9rem;
+  margin-right: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+button {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #111827;
+  border-radius: 0.4rem;
+  background: #111827;
+  color: white;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: #1f2937;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: white;
+  color: #111827;
+  border-color: #d1d5db;
+}
+
+button.secondary:hover {
+  background: #f9fafb;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Tables ───────────────────────────────────────────────────────── */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+th {
+  font-weight: 600;
+  color: #374151;
+  background: #f9fafb;
+}
+
+/* ── Error / empty state ──────────────────────────────────────────── */
+
+.error {
+  color: #b91c1c;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.empty {
+  color: #9ca3af;
+  font-style: italic;
+  padding: 0.5rem 0;
+}
+
+/* ── Spinner ──────────────────────────────────────────────────────── */
+
+.spinner {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid #e5e7eb;
+  border-top-color: #111827;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading {
+  padding: 2rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+/* ── Finding Card ─────────────────────────────────────────────────── */
+
+.finding-card {
+  border-left: 4px solid #d1d5db;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+  background: white;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.finding-card.severity-info {
+  border-left-color: #3b82f6;
+}
+
+.finding-card.severity-warning {
+  border-left-color: #f59e0b;
+}
+
+.finding-card.severity-critical {
+  border-left-color: #ef4444;
+}
+
+.finding-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.finding-summary {
+  font-weight: 500;
+}
+
+.finding-detail {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.finding-detail h4 {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.finding-detail ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.finding-detail li {
+  margin-bottom: 0.15rem;
+}
+
+/* ── Summary / Health Score ───────────────────────────────────────── */
+
+.health-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: #e5e7eb;
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+
+.health-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+.health-bar-fill.healthy {
+  background: #22c55e;
+}
+
+.health-bar-fill.warning {
+  background: #f59e0b;
+}
+
+.health-bar-fill.critical {
+  background: #ef4444;
+}
+
+.health-score {
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+/* ── Port sections ────────────────────────────────────────────────── */
+
+.port-sections {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+}
+
+/* ── Key click list ───────────────────────────────────────────────── */
+
+.key-list {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.key-list-item {
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 0.85rem;
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+
+.key-list-item:hover {
+  background: #f3f4f6;
+}
+
+.key-list-item.selected {
+  background: #e5e7eb;
+  font-weight: 600;
+}
+
+/* ── Utility ──────────────────────────────────────────────────────── */
+
+.mono {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.85rem;
+}
+
+.text-sm {
+  font-size: 0.85rem;
+}
+
+.mt-1 {
+  margin-top: 0.5rem;
+}
+
+.mb-1 {
+  margin-bottom: 0.5rem;
+}
+
+.flex {
+  display: flex;
+}
+
+.gap-2 {
+  gap: 0.5rem;
+}
+
+.items-center {
+  align-items: center;
+}
+
+/* ── Onboarding / Guide ───────────────────────────────────────── */
+
+.guide-box {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.guide-box h3 {
+  margin: 0 0 0.5rem;
+  color: #1e40af;
+  font-size: 1rem;
+}
+
+.guide-box p {
+  margin: 0 0 0.75rem;
+  color: #1e3a5f;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.guide-box ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #1e3a5f;
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.guide-box ol li {
+  margin-bottom: 0.25rem;
+}
+
+.guide-box code {
+  background: #dbeafe;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.85rem;
+}
