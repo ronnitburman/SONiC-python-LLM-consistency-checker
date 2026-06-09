@@ -13,8 +13,10 @@ from rich.text import Text
 from sonic_consistency_checker.core.db_config_loader import SonicDbConfigLoader
 from sonic_consistency_checker.core.discovery import SonicDiscoveryService
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
-from sonic_consistency_checker.core.models import Finding
+from sonic_consistency_checker.core.models import DiagnosticSummary, Finding
 from sonic_consistency_checker.sonic.ports import PortService
+from sonic_consistency_checker.core.diff_engine import DiffEngine
+from sonic_consistency_checker.core.summary import SummaryEngine
 from sonic_consistency_checker.swss.connector import swss_available
 from sonic_consistency_checker.swss.config_db import ConfigDbReader, RemoteConfigDbReader
 from sonic_consistency_checker.swss.sonic_v2 import SonicV2Reader, RemoteSonicV2Reader
@@ -551,19 +553,17 @@ def all_findings(
         help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
     ),
 ) -> None:
-    """Run consistency checks on all discovered ports."""
-    svc = PortService(
-        redis_client=SonicRedisClient(
-            connection_mode=connection_mode,
-            container_name=container_name,
-            orb_vm_name=orb_vm_name,
-        )
+    """Run consistency checks on all discovered ports, routes, VLANs, and LAGs."""
+    client = SonicRedisClient(
+        connection_mode=connection_mode,
+        container_name=container_name,
+        orb_vm_name=orb_vm_name,
     )
+    svc = PortService(redis_client=client)
     port_views = svc.list_port_views()
 
-    all_f: list[Finding] = []
-    for pv in port_views:
-        all_f.extend(pv.findings)
+    engine = DiffEngine()
+    all_f: list[Finding] = engine.check_all(port_views, redis_client=client)
 
     console.print()
     console.print(Text("Findings", style="bold cyan"))
@@ -574,6 +574,9 @@ def all_findings(
     else:
         for finding in all_f:
             _print_finding(finding)
+
+    # ── Summary (Step 4A, Item 8) ───────────────────────────────
+    _print_summary(all_f, client)
 
     console.print()
 
@@ -621,7 +624,341 @@ def check_port(
         for finding in view.findings:
             _print_finding(finding)
 
+    # ── Per-port summary (Step 4A, Item 8) ───────────────────────
+    if view.findings:
+        _print_port_summary(view.findings, view.name)
+
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# Step 4A — Diagnostic Summary & Extended Checks
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="summary")
+def health_summary(
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name for docker_exec/orb_vm_exec mode",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name for orb_vm_exec mode (auto-detected if omitted)",
+    ),
+) -> None:
+    """Show a diagnostic health summary across ports, routes, VLANs, and LAGs."""
+    client = SonicRedisClient(
+        connection_mode=connection_mode,
+        container_name=container_name,
+        orb_vm_name=orb_vm_name,
+    )
+    svc = PortService(redis_client=client)
+    port_views = svc.list_port_views()
+
+    engine = DiffEngine()
+    all_findings: list[Finding] = engine.check_all(port_views, redis_client=client)
+
+    _print_summary(all_findings, client, compact=False)
+
+
+# ── Summary helper functions (Step 4A, Item 8) ───────────────────────
+
+
+def _print_summary(
+    findings: list[Finding],
+    client: SonicRedisClient,
+    compact: bool = True,
+) -> None:
+    """Print a diagnostic summary from findings."""
+    summary_engine = SummaryEngine()
+
+    # Gather extra data if available
+    route_drift_data: dict | None = None
+    vlan_data: dict | None = None
+    lag_data: dict | None = None
+
+    if not compact:
+        try:
+            route_drift_data = _gather_route_data(client)
+        except Exception:
+            pass
+        try:
+            vlan_data = _gather_vlan_data(client)
+        except Exception:
+            pass
+        try:
+            lag_data = _gather_lag_data(client)
+        except Exception:
+            pass
+
+    summary = summary_engine.summarize(
+        findings,
+        route_drift_data=route_drift_data,
+        vlan_data=vlan_data,
+        lag_data=lag_data,
+    )
+    _render_summary(summary, compact=compact)
+
+
+def _print_port_summary(findings: list[Finding], port_name: str) -> None:
+    """Print a per-port summary."""
+    summary = SummaryEngine().summarize(findings)
+
+    console.print()
+    console.print(
+        Text(f"Summary for {port_name}", style="bold magenta")
+    )
+
+    # Severity counts
+    sev_parts: list[str] = []
+    if summary.critical_count:
+        sev_parts.append(
+            f"[bold red]{summary.critical_count} critical[/bold red]"
+        )
+    if summary.warning_count:
+        sev_parts.append(
+            f"[yellow]{summary.warning_count} warning[/yellow]"
+        )
+    if summary.info_count:
+        sev_parts.append(
+            f"[cyan]{summary.info_count} info[/cyan]"
+        )
+    if sev_parts:
+        console.print("  Severity: " + ", ".join(sev_parts))
+    else:
+        console.print("  Severity: [green]none[/green]")
+
+    # Health score
+    score_color = (
+        "green"
+        if summary.overall_status == "healthy"
+        else "yellow" if summary.overall_status == "warning"
+        else "red"
+    )
+    console.print(
+        f"  Health: [{score_color}]{summary.overall_health_score}/100"
+        f" ({summary.overall_status})[/{score_color}]"
+    )
+
+
+def _render_summary(summary: DiagnosticSummary, compact: bool = True) -> None:
+    """Render a DiagnosticSummary to the console."""
+    console.print()
+    console.print(Text("═" * 56, style="bold"))
+    console.print(Text("Diagnostic Summary", style="bold cyan"))
+    console.print(Text("═" * 56, style="bold"))
+    console.print()
+
+    # ── Overall health ───────────────────────────────────────────
+    score_color = (
+        "green"
+        if summary.overall_status == "healthy"
+        else "yellow" if summary.overall_status == "warning"
+        else "red"
+    )
+    status_icon = (
+        "✓" if summary.overall_status == "healthy"
+        else "⚠" if summary.overall_status == "warning"
+        else "✗"
+    )
+    console.print(
+        Text(
+            f"  {status_icon} Overall: [{score_color}]{summary.overall_health_score}/100"
+            f" — {summary.overall_status.upper()}[/{score_color}]",
+            style="bold",
+        )
+    )
+    console.print()
+
+    # ── Severity counts ──────────────────────────────────────────
+    sev_table = Table(show_header=False, box=None, padding=(0, 2))
+    sev_table.add_column(style="bold")
+    sev_table.add_column(justify="right")
+    sev_table.add_row(
+        f"[bold red]Critical[/bold red]", str(summary.critical_count)
+    )
+    sev_table.add_row(
+        f"[yellow]Warning[/yellow]", str(summary.warning_count)
+    )
+    sev_table.add_row(
+        f"[cyan]Info[/cyan]", str(summary.info_count)
+    )
+    sev_table.add_row(
+        "Total", str(summary.total_findings)
+    )
+    console.print(Text("Findings:", style="bold"))
+    console.print(sev_table)
+
+    # ── Category breakdown ───────────────────────────────────────
+    if summary.categories:
+        console.print()
+        console.print(Text("By Category:", style="bold"))
+        cat_table = Table(show_header=False, box=None, padding=(0, 2))
+        cat_table.add_column()
+        cat_table.add_column(justify="right")
+        for cat, count in sorted(summary.categories.items()):
+            cat_table.add_row(cat, str(count))
+        console.print(cat_table)
+
+    # ── Subsystem summaries ──────────────────────────────────────
+    if summary.route_drift:
+        console.print()
+        _render_route_drift(summary.route_drift)
+
+    if summary.vlan_membership:
+        _render_vlan_summary(summary.vlan_membership)
+
+    if summary.lag_member_health:
+        _render_lag_summary(summary.lag_member_health)
+
+    console.print()
+    console.print(Text("═" * 56, style="bold"))
+
+
+def _render_route_drift(drift: Any) -> None:
+    """Render route drift summary."""
+    drift_color = (
+        "green" if drift.status == "ok"
+        else "red" if drift.status == "drift"
+        else "yellow"
+    )
+    icon = "✓" if drift.status == "ok" else "✗" if drift.status == "drift" else "?"
+
+    console.print(Text("Route Table:", style="bold"))
+    if drift.status == "unknown":
+        console.print(
+            f"  {icon} Status: [{drift_color}]unknown — could not determine[/{drift_color}]"
+        )
+    else:
+        console.print(
+            f"  {icon} APPL_DB routes: {drift.appl_route_count}"
+        )
+        console.print(
+            f"     ASIC_DB routes: {drift.asic_route_count}"
+        )
+        if drift.drift > 0:
+            console.print(
+                f"     Drift: [{drift_color}]{drift.drift}[/{drift_color}]"
+            )
+
+
+def _render_vlan_summary(vlan: Any) -> None:
+    """Render VLAN membership summary."""
+    vlan_color = (
+        "green" if vlan.status == "ok"
+        else "yellow" if vlan.status == "mismatch"
+        else "yellow"
+    )
+    icon = "✓" if vlan.status == "ok" else "⚠"
+
+    console.print(Text("VLAN Membership:", style="bold"))
+    console.print(
+        f"  {icon} Status: [{vlan_color}]{vlan.status.upper()}[/{vlan_color}]"
+    )
+    if vlan.vlans_with_mismatch:
+        console.print(
+            f"     Mismatches: {', '.join(vlan.vlans_with_mismatch)}"
+        )
+
+
+def _render_lag_summary(lag: Any) -> None:
+    """Render LAG member health summary."""
+    lag_color = (
+        "green" if lag.status == "ok"
+        else "yellow" if lag.status == "mismatch"
+        else "yellow"
+    )
+    icon = "✓" if lag.status == "ok" else "⚠"
+
+    console.print(Text("LAG Member Health:", style="bold"))
+    console.print(
+        f"  {icon} Status: [{lag_color}]{lag.status.upper()}[/{lag_color}]"
+    )
+    if lag.lags_with_mismatch:
+        console.print(
+            f"     Mismatches: {', '.join(lag.lags_with_mismatch)}"
+        )
+
+
+def _gather_route_data(client: SonicRedisClient) -> dict:
+    """Gather route counts for summary."""
+    try:
+        appl_routes = client.scan_keys("APPL_DB", "ROUTE_TABLE:*")
+        appl_count = len(appl_routes)
+    except Exception:
+        appl_count = -1
+    try:
+        asic_routes = client.scan_keys(
+            "ASIC_DB", "*SAI_OBJECT_TYPE_ROUTE_ENTRY*"
+        )
+        asic_count = len(asic_routes)
+    except Exception:
+        asic_count = -1
+    return {"appl_route_count": appl_count, "asic_route_count": asic_count}
+
+
+def _gather_vlan_data(client: SonicRedisClient) -> dict:
+    """Gather VLAN counts for summary."""
+    try:
+        config_vlan_keys = client.scan_keys("CONFIG_DB", "VLAN_MEMBER|*")
+        config_count = len(config_vlan_keys)
+    except Exception:
+        config_count = 0
+    try:
+        app_vlan_keys = client.scan_keys("APPL_DB", "VLAN_MEMBER:*")
+        app_count = len(app_vlan_keys)
+    except Exception:
+        app_count = 0
+
+    # Build mismatch list
+    mismatches: list[str] = []
+    if config_count > 0 and app_count >= 0:
+        config_set = set()
+        for key in config_vlan_keys:
+            parts = key.split("|")
+            if len(parts) >= 3:
+                config_set.add(f"{parts[1]}/{parts[2]}")
+        app_set = set()
+        for key in app_vlan_keys:
+            parts = key.split(":")
+            if len(parts) >= 3:
+                app_set.add(f"{parts[1]}/{parts[2]}")
+        mismatches = sorted(config_set - app_set)
+
+    return {
+        "config_vlan_count": config_count,
+        "app_vlan_count": app_count,
+        "vlans_with_mismatch": mismatches[:10],  # cap
+    }
+
+
+def _gather_lag_data(client: SonicRedisClient) -> dict:
+    """Gather LAG member data for summary."""
+    try:
+        config_lag_keys = client.scan_keys("CONFIG_DB", "PORTCHANNEL|*")
+        config_count = len(config_lag_keys)
+    except Exception:
+        config_count = 0
+    try:
+        app_lag_keys = client.scan_keys("APPL_DB", "LAG_TABLE:*")
+        app_count = len(app_lag_keys)
+    except Exception:
+        app_count = 0
+    return {
+        "config_lag_count": config_count,
+        "app_lag_count": app_count,
+        "lags_with_mismatch": [],
+    }
 
 
 # ---------------------------------------------------------------------------
