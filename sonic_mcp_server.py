@@ -19,6 +19,7 @@ Pi MCP config (in ~/.pi/mcp.json):
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
@@ -29,6 +30,15 @@ from sonic_consistency_checker.core.discovery import SonicDiscoveryService
 from sonic_consistency_checker.core.models import Finding
 from sonic_consistency_checker.core.redis_client import SonicRedisClient
 from sonic_consistency_checker.sonic.ports import PortService
+
+# ── Logging ──────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [MCP] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="sonic-checker",
@@ -52,6 +62,9 @@ def _make_client(
     """Build a SonicRedisClient from optional overrides, falling back to env."""
     from dotenv import load_dotenv
     load_dotenv()
+
+    mode = connection_mode or os.getenv("SONIC_CONNECTION_MODE")
+    logger.debug("MCP tool request: mode=%s container=%s", mode, container_name)
 
     return SonicRedisClient(
         connection_mode=connection_mode or os.getenv("SONIC_CONNECTION_MODE"),
@@ -440,7 +453,7 @@ def main() -> None:
     """Entry point: run the MCP server.
 
     Transport is controlled by SONIC_MCP_TRANSPORT env var or --transport flag.
-    Default: streamable-http on port 8100.
+    Default: streamable-http on port 9100.
 
     Usage:
       python sonic_mcp_server.py                          # streamable-http :9100
@@ -470,6 +483,14 @@ def main() -> None:
         help="Host to bind (default: 127.0.0.1)",
     )
     args = parser.parse_args()
+
+    # ── Startup banner ──────────────────────────────────────────────
+    conn_mode = os.getenv("SONIC_CONNECTION_MODE", "not set")
+    container = os.getenv("SONIC_CONTAINER_NAME", "not set")
+    logger.info("─" * 50)
+    logger.info("MCP Server starting on %s:%d [%s]", args.host, args.port, args.transport)
+    logger.info("Conn mode: %s  Container: %s", conn_mode, container)
+    logger.info("─" * 50)
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")

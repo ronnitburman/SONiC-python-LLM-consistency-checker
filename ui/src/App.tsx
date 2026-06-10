@@ -18,8 +18,9 @@ export type AppData = {
   error: string;
   loaded: boolean;
 };
+import { Chat } from "./pages/Chat";
 
-type Page = "dashboard" | "db" | "ports" | "findings" | "swss";
+type Page = "dashboard" | "db" | "ports" | "findings" | "swss" | "chat";
 
 const PAGES: { key: Page; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
@@ -27,6 +28,7 @@ const PAGES: { key: Page; label: string }[] = [
   { key: "ports", label: "Port Explorer" },
   { key: "findings", label: "Findings" },
   { key: "swss", label: "SWSS SDK" },
+  { key: "chat", label: "AI Chat" },
 ];
 
 export default function App() {
@@ -113,6 +115,9 @@ export default function App() {
         </div>
         <div style={{ display: page === "swss" ? "block" : "none" }}>
           <SwssSdkExplorer data={data} />
+        </div>
+        <div style={{ display: page === "chat" ? "block" : "none" }}>
+          <Chat />
         </div>
       </main>
     </div>
