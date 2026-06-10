@@ -13,8 +13,8 @@ Reads SONiC's internal Redis DB configuration dynamically, explores Redis state,
 | 3 | Port View | [STEP_03.md](docs/readme/STEP_03.md) |
 | 4 | Consistency Checks | [STEP_04.md](docs/readme/STEP_04.md) |
 | 5 | SWSS SDK Explorer | [STEP_05.md](docs/readme/STEP_05.md) |
-| 6 | UI Demo | *(coming)* |
-| 7 | LLM Explanation Layer | *(coming)* |
+| 6 | **UI Demo** — React + TypeScript + Vite on custom local domain | [STEP_06.md](docs/readme/STEP_06.md) |
+| 7 | **AI Chat Agent** — LangGraph agent with tool calling, skill loading, MCP bridge | [STEP_07.md](docs/readme/STEP_07.md) |
 
 
 ## Quick Start
@@ -205,15 +205,15 @@ An MCP (Model Context Protocol) server that exposes all SONiC diagnostic tools a
 
 ### Running the MCP Server
 
-**Default (streamable HTTP on port 8100):**
+**Default (streamable HTTP on port 9100):**
 
 ```bash
 # Terminal 1: start the server (runs as a long-lived service)
 .venv/bin/python sonic_mcp_server.py
-# Listening on http://127.0.0.1:8100/mcp
+# Listening on http://127.0.0.1:9100/mcp
 
 # Test with curl:
-curl -X POST http://127.0.0.1:8100/mcp \
+curl -X POST http://127.0.0.1:9100/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}'
 ```
@@ -253,7 +253,7 @@ npm install                    # TypeScript MCP client SDK
 
 # Terminal 2: Start pi in the project root
 pi
-# Extension auto-connects to http://127.0.0.1:8100/mcp
+# Extension auto-connects to http://127.0.0.1:9100/mcp
 # All 9 sonic_* tools are now available
 ```
 
@@ -291,7 +291,7 @@ For clients that spawn the server as a child process (e.g., Claude Desktop):
 │    └─ Registers each tool with pi.registerTool()     │
 │                                                      │
 └──────────────┬───────────────────────────────────────┘
-               │ HTTP POST → http://127.0.0.1:8100/mcp
+               │ HTTP POST → http://127.0.0.1:9100/mcp
                ▼
 ┌──────────────────────────────────────────────────────┐
 │  sonic_mcp_server.py  (FastMCP server)               │

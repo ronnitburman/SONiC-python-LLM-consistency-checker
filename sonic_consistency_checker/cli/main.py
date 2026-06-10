@@ -962,6 +962,112 @@ def _gather_lag_data(client: SonicRedisClient) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Step 7 — AI Chat Agent
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="chat")
+def ai_chat(
+    connection_mode: Optional[str] = typer.Option(
+        None,
+        "--connection-mode",
+        "-m",
+        help="Connection mode: docker_exec, orb_vm_exec, or local_redis",
+    ),
+    container_name: Optional[str] = typer.Option(
+        None,
+        "--container-name",
+        "-c",
+        help="Docker container name",
+    ),
+    orb_vm_name: Optional[str] = typer.Option(
+        None,
+        "--orb-vm-name",
+        help="OrbStack VM name (auto-detected if omitted)",
+    ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        "-d",
+        help="Enable debug logging to see agent/MCP internals",
+    ),
+) -> None:
+    """Start an interactive chat with the SONiC AI diagnostic agent.
+
+    The agent can inspect the switch, run consistency checks, and
+    load SONiC skill documents to help diagnose issues.
+
+    Type /reset to start a new conversation, /exit to quit.
+    """
+    import logging
+    import os
+    from sonic_consistency_checker.ai.chat_agent import ChatAgent
+
+    # Apply connection-mode overrides as env vars so the MCP server picks them up
+    if connection_mode:
+        os.environ["SONIC_CONNECTION_MODE"] = connection_mode
+    if container_name:
+        os.environ["SONIC_CONTAINER_NAME"] = container_name
+    if orb_vm_name:
+        os.environ["SONIC_ORB_VM_NAME"] = orb_vm_name
+
+    # Only enable verbose logging when --debug is passed.
+    # (When using the UI, logs appear in the uvicorn terminal automatically.)
+    if debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
+
+    agent = ChatAgent(debug=debug)
+
+    console.print()
+    console.print(Text("SONiC AI Diagnostic Agent", style="bold cyan"))
+    console.print(Text("Type /reset to clear, /exit to quit", style="dim"))
+    console.print()
+
+    while True:
+        try:
+            user_input = typer.prompt("You").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\nGoodbye!")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.lower() == "/exit":
+            console.print("Goodbye!")
+            break
+
+        if user_input.lower() == "/reset":
+            agent.reset()
+            console.print(Text("Conversation reset.", style="dim"))
+            console.print()
+            continue
+
+        console.print()
+        with console.status("[dim]Thinking...[/dim]"):
+            response, thinking_steps = agent.chat(user_input)
+
+        # Show thinking steps
+        if thinking_steps:
+            console.print(Text("Thinking:", style="dim"))
+            for step in thinking_steps:
+                tool_name = step.get("tool", "unknown")
+                result_len = step.get("result_full_len", 0)
+                console.print(
+                    f"  → {tool_name} ({result_len} chars)",
+                    style="dim",
+                )
+
+        console.print(Text("Agent:", style="bold green"))
+        console.print(response)
+        console.print()
+
+
+# ---------------------------------------------------------------------------
 # Step 5 — SWSS SDK Exploration
 # ---------------------------------------------------------------------------
 

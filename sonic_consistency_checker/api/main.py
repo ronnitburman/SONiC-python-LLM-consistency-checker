@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -14,13 +15,48 @@ from sonic_consistency_checker.api.routes_dbs import router as dbs_router
 from sonic_consistency_checker.api.routes_ports import router as ports_router
 from sonic_consistency_checker.api.routes_findings import router as findings_router
 from sonic_consistency_checker.api.routes_swss import router as swss_router
+from sonic_consistency_checker.api.routes_ai import router as ai_router
 
 load_dotenv()
+
+# Ensure AI component logs are visible in the uvicorn console.
+# (uvicorn only routes its own logger by default; this makes our
+# chat_agent, mcp_bridge, and model_provider loggers visible too.)
+for _name in (
+    "sonic_consistency_checker.ai",
+    "sonic_consistency_checker.ai.chat_agent",
+    "sonic_consistency_checker.ai.mcp_bridge",
+    "sonic_consistency_checker.ai.model_provider",
+):
+    _lg = logging.getLogger(_name)
+    _lg.setLevel(logging.INFO)
+    if not _lg.handlers:
+        _lg.addHandler(logging.StreamHandler())
 
 app = FastAPI(
     title="SONiC Consistency Checker API",
     version="0.1.0",
 )
+
+
+@app.on_event("startup")
+async def _startup_banner() -> None:
+    """Print configuration summary on startup."""
+    logger = logging.getLogger("uvicorn")
+    provider = os.getenv("LLM_PROVIDER", "not set")
+    if provider == "deepseek":
+        model = os.getenv("DEEPSEEK_MODEL", "not set")
+    elif provider == "ollama":
+        model = os.getenv("OLLAMA_MODEL", "not set")
+    else:
+        model = "not set"
+    mcp_url = os.getenv("SONIC_MCP_URL", "not set")
+    conn_mode = os.getenv("SONIC_CONNECTION_MODE", "not set")
+    logger.info("─" * 60)
+    logger.info("LLM:       %s → %s", provider, model)
+    logger.info("MCP URL:   %s", mcp_url)
+    logger.info("Conn mode: %s", conn_mode)
+    logger.info("─" * 60)
 
 # Allow the Vite dev server to call the API
 app.add_middleware(
@@ -39,6 +75,7 @@ app.include_router(dbs_router)
 app.include_router(ports_router)
 app.include_router(findings_router)
 app.include_router(swss_router)
+app.include_router(ai_router)
 
 
 @app.get("/health")

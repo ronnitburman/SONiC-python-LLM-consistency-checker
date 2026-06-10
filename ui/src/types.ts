@@ -128,3 +128,21 @@ export type SwssCheckResponse = {
   message: string;
   errors: string[];
 };
+
+// ── Step 7: AI Chat ────────────────────────────────────────────────
+
+export type ThinkingStep = {
+  type: "tool_call";
+  tool: string;
+  args: Record<string, unknown>;
+  result?: string;
+  result_full_len?: number;
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  object_type: string;
+  object_name: string;
+  thinking_steps?: ThinkingStep[];
+};
